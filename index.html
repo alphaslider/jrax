@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>J-Rax Modular FX Rack & Patchbay</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body {
+            background: #181818;
+            color: #d4d4d4;
+            font-family: monospace;
+            font-size: 11px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        header {
+            background: #222;
+            border-bottom: 1px solid #333;
+            padding: 8px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        h1 {
+            font-size: 13px;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .transport-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        button {
+            background: #2a2a2a;
+            color: #ccc;
+            border: 1px solid #444;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+        button:hover {
+            background: #333;
+            color: #fff;
+            border-color: #666;
+        }
+        button.active {
+            background: #007acc;
+            color: #fff;
+            border-color: #0098ff;
+        }
+        input[type="file"] { display: none; }
+
+        .workspace {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* FX Store Sidebar */
+        .fx-store {
+            width: 180px;
+            background: #202020;
+            border-right: 1px solid #333;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 10;
+        }
+        .fx-store h3 {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .store-item {
+            background: #282828;
+            border: 1px solid #3a3a3a;
+            padding: 8px;
+            cursor: grab;
+            text-align: center;
+            color: #ddd;
+            font-weight: bold;
+        }
+        .store-item:active { cursor: grabbing; }
+        .store-item:hover { background: #323232; border-color: #007acc; }
+
+        /* Canvas / Patch Area */
+        .canvas-area {
+            flex: 1;
+            background: #141414;
+            position: relative;
+            overflow: auto;
+            background-image: 
+                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        svg.patch-cables {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Modules */
+        .rack-module {
+            position: absolute;
+            background: #222;
+            border: 1px solid #444;
+            width: 200px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            z-index: 2;
+        }
+        .module-titlebar {
+            background: #2c2c2c;
+            border-bottom: 1px solid #3d3d3d;
+            padding: 6px 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: move;
+            font-weight: bold;
+            color: #fff;
+        }
+        .module-close {
+            background: none;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 0 4px;
+        }
+        .module-close:hover { color: #ff5555; background: none; }
+        
+        .module-body {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .control-row {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .control-row label {
+            font-size: 9px;
+            color: #888;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #007acc;
+        }
+
+        /* Jacks */
+        .jacks-container {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 4px;
+            border-top: 1px solid #333;
+            padding-top: 6px;
+        }
+        .jack-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .jack-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 9px;
+            color: #aaa;
+        }
+        .jack-row.output { flex-direction: row-reverse; }
+        
+        .jack {
+            width: 14px;
+            height: 14px;
+            background: #111;
+            border: 2px solid #555;
+            border-radius: 50%;
+            cursor: crosshair;
+            transition: border-color 0.1s, background 0.1s;
+        }
+        .jack:hover { border-color: #007acc; background: #222; }
+        .jack.connected { border-color: #4caf50; background: #2e7d32; }
+        .jack.active-cable-source { border-color: #ff9800; background: #e65100; box-shadow: 0 0 6px #ff9800; }
+
+        .status-bar {
+            background: #1a1a1a;
+            border-top: 1px solid #333;
+            padding: 4px 12px;
+            font-size: 10px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>J-Rax // Modular FX & Patchbay</h1>
+    <div class="transport-controls">
+        <button id="btn-play" onclick="togglePlay()" disabled>Play All</button>
+        <button onclick="resetAudioContext()">Reset Engine</button>
+    </div>
+</header>
+
+<input type="file" id="hidden-audio-loader" accept="audio/*" onchange="handleFileSelected(event)">
+
+<div class="workspace">
+    <!-- FX Store -->
+    <div class="fx-store">
+        <h3>FX Store</h3>
+        <div class="store-item" draggable="true" ondragstart="dragStoreItem(event, 'source')">Source Player</div>
+        <div class="store-item" draggable="true" ondragstart="dragStoreItem(event, 'gain')">Gain / Trim</div>
+        <div class="store-item" draggable="true" ondragstart="dragStoreItem(event, 'eq')">3-Band EQ</div>
+        <div class="store-item" draggable="true" ondragstart="dragStoreItem(event, 'filter')">Biquad Filter</div>
+        <div class="store-item" draggable="true" ondragstart="dragStoreItem(event, 'compressor')">Compressor</div>
+        <div class="store-item" draggable="true" ondragstart="dragStoreItem(event, 'delay')">Delay / Echo</div>
+        <div class="store-item" draggable="true" ondragstart="dragStoreItem(event, 'output')">Master Out</div>
+    </div>
+
+    <!-- Patch Canvas -->
+    <div class="canvas-area" id="canvas-area" ondragover="event.preventDefault()" ondrop="dropModule(event)" onmousemove="onCanvasMouseMove(event)" onmouseup="onCanvasMouseUp(event)">
+        <svg class="patch-cables" id="cable-svg"></svg>
+    </div>
+</div>
+
+<div class="status-bar" id="status-text">Engine Ready. Drag from Output jack to Input jack to patch cables. Double-click Source Player to load audio.</div>
+
+<script>
+    let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let isPlaying = false;
+    let modules = {};
+    let connections = [];
+    let moduleIdCounter = 0;
+    let activeCable = null; // { fromMod, fromType, x, y }
+    let targetingSourceModuleId = null;
+
+    function setStatus(msg) {
+        document.getElementById('status-text').textContent = msg;
+    }
+
+    function resetAudioContext() {
+        if (audioCtx) audioCtx.close();
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        isPlaying = false;
+        document.getElementById('btn-play').textContent = 'Play All';
+        document.getElementById('btn-play').classList.remove('active');
+        setStatus('Audio engine reset.');
+    }
+
+    function triggerLoadAudio(id) {
+        targetingSourceModuleId = id;
+        document.getElementById('hidden-audio-loader').click();
+    }
+
+    function handleFileSelected(event) {
+        const file = event.target.files[0];
+        if (!file || !targetingSourceModuleId) return;
+        
+        const modId = targetingSourceModuleId;
+        setStatus(`Loading ${file.name}...`);
+        
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            audioCtx.decodeAudioData(e.target.result, function(buffer) {
+                modules[modId].audioBuffer = buffer;
+                document.getElementById(`${modId}-filename`).textContent = file.name.substring(0, 18) + '...';
+                document.getElementById('btn-play').disabled = false;
+                setStatus(`Loaded into ${modId}: ${file.name}`);
+            }, function(err) {
+                alert('Error decoding audio: ' + err);
+            });
+        };
+        reader.readAsArrayBuffer(file);
+        event.target.value = '';
+    }
+
+    function togglePlay() {
+        if (isPlaying) {
+            stopAllSources();
+        } else {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            startAllSources();
+        }
+    }
+
+    function startAllSources() {
+        let hasActive = false;
+        for (let id in modules) {
+            if (modules[id].type === 'source' && modules[id].audioBuffer) {
+                startSourceModule(id);
+                hasActive = true;
+            }
+        }
+        if (!hasActive) {
+            alert('Load an audio file into a Source Player first (double-click module).');
+            return;
+        }
+        isPlaying = true;
+        document.getElementById('btn-play').textContent = 'Stop All';
+        document.getElementById('btn-play').classList.add('active');
+        setStatus('Playing audio sources...');
+    }
+
+    function stopAllSources() {
+        for (let id in modules) {
+            if (modules[id].type === 'source' && modules[id].sourceNode) {
+                try { modules[id].sourceNode.stop(); } catch(e){}
+                modules[id].sourceNode = null;
+            }
+        }
+        isPlaying = false;
+        document.getElementById('btn-play').textContent = 'Play All';
+        document.getElementById('btn-play').classList.remove('active');
+        setStatus('Playback stopped.');
+    }
+
+    function startSourceModule(id) {
+        const mod = modules[id];
+        if (!mod.audioBuffer) return;
+        if (mod.sourceNode) {
+            try { mod.sourceNode.stop(); } catch(e){}
+        }
+        
+        const src = audioCtx.createBufferSource();
+        src.buffer = mod.audioBuffer;
+        src.loop = true;
+        src.connect(mod.internalNode);
+        src.start(0);
+        mod.sourceNode = src;
+    }
+
+    function dragStoreItem(e, type) {
+        e.dataTransfer.setData('text/plain', type);
+    }
+
+    function dropModule(e) {
+        e.preventDefault();
+        const type = e.dataTransfer.getData('text/plain');
+        if (!type) return;
+
+        const canvasRect = document.getElementById('canvas-area').getBoundingClientRect();
+        const x = e.clientX - canvasRect.left + document.getElementById('canvas-area').scrollLeft;
+        const y = e.clientY - canvasRect.top + document.getElementById('canvas-area').scrollTop;
+
+        createModule(type, x, y);
+    }
+
+    function createModule(type, x, y) {
+        const id = 'mod_' + (++moduleIdCounter);
+        const el = document.createElement('div');
+        el.className = 'rack-module';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.id = id;
+
+        let title = type.toUpperCase();
+        let bodyHtml = '';
+        let internalNode = null;
+
+        if (type === 'source') {
+            title = 'Source Player';
+            internalNode = audioCtx.createGain();
+            bodyHtml = `
+                <div class="control-row" ondblclick="triggerLoadAudio('${id}')" style="cursor: pointer; background: #1a1a1a; padding: 6px; border: 1px dashed #555; text-align: center;">
+                    <span style="color:#aaa; font-size:10px;">[Dbl-Click to Load]</span>
+                    <span id="${id}-filename" style="color:#4caf50; font-weight:bold; margin-top:2px; display:block;">No File Loaded</span>
+                </div>`;
+        } else if (type === 'gain') {
+            title = 'Gain / Trim';
+            internalNode = audioCtx.createGain();
+            bodyHtml = `<div class="control-row"><label>Gain: <span id="${id}-val">0</span> dB</label><input type="range" min="-36" max="12" value="0" step="0.5" oninput="updateParam('${id}', 'gain', this.value)"></div>`;
+        } else if (type === 'eq') {
+            title = '3-Band EQ';
+            const low = audioCtx.createBiquadFilter(); low.type = 'lowshelf'; low.frequency.value = 250;
+            const mid = audioCtx.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1000;
+            const high = audioCtx.createBiquadFilter(); high.type = 'highshelf'; high.frequency.value = 4000;
+            low.connect(mid); mid.connect(high);
+            internalNode = { input: low, output: high };
+            bodyHtml = `
+                <div class="control-row"><label>Low: <span id="${id}-l">0</span>dB</label><input type="range" min="-15" max="15" value="0" step="0.5" oninput="updateEQ('${id}', 'low', this.value)"></div>
+                <div class="control-row"><label>Mid: <span id="${id}-m">0</span>dB</label><input type="range" min="-15" max="15" value="0" step="0.5" oninput="updateEQ('${id}', 'mid', this.value)"></div>
+                <div class="control-row"><label>High: <span id="${id}-h">0</span>dB</label><input type="range" min="-15" max="15" value="0" step="0.5" oninput="updateEQ('${id}', 'high', this.value)"></div>`;
+        } else if (type === 'filter') {
+            title = 'Biquad Filter';
+            internalNode = audioCtx.createBiquadFilter();
+            internalNode.type = 'lowpass';
+            internalNode.frequency.value = 2000;
+            bodyHtml = `<div class="control-row"><label>Cutoff: <span id="${id}-freq">2000</span>Hz</label><input type="range" min="50" max="18000" value="2000" step="10" oninput="updateParam('${id}', 'freq', this.value)"></div>`;
+        } else if (type === 'compressor') {
+            title = 'Compressor';
+            internalNode = audioCtx.createDynamicsCompressor();
+            internalNode.threshold.value = -20;
+            internalNode.ratio.value = 4;
+            bodyHtml = `
+                <div class="control-row"><label>Threshold: <span id="${id}-thresh">-20</span>dB</label><input type="range" min="-50" max="0" value="-20" step="1" oninput="updateComp('${id}', 'thresh', this.value)"></div>
+                <div class="control-row"><label>Ratio: <span id="${id}-ratio">4</span>:1</label><input type="range" min="1" max="20" value="4" step="1" oninput="updateComp('${id}', 'ratio', this.value)"></div>`;
+        } else if (type === 'delay') {
+            title = 'Delay / Echo';
+            internalNode = audioCtx.createDelay(5.0);
+            internalNode.delayTime.value = 0.3;
+            const feedback = audioCtx.createGain(); feedback.gain.value = 0.3;
+            internalNode.connect(feedback); feedback.connect(internalNode);
+            bodyHtml = `<div class="control-row"><label>Time: <span id="${id}-time">300</span>ms</label><input type="range" min="50" max="1000" value="300" step="10" oninput="updateDelay('${id}', this.value)"></div>`;
+        } else if (type === 'output') {
+            title = 'Master Out';
+            internalNode = audioCtx.createGain();
+            internalNode.connect(audioCtx.destination);
+            bodyHtml = `<div class="control-row"><label>Volume: <span id="${id}-vol">0</span>dB</label><input type="range" min="-40" max="6" value="0" step="0.5" oninput="updateParam('${id}', 'vol', this.value)"></div>`;
+        }
+
+        el.innerHTML = `
+            <div class="module-titlebar" onmousedown="startDragModule(event, '${id}')">
+                <span>${title}</span>
+                <button class="module-close" onclick="removeModule('${id}')">×</button>
+            </div>
+            <div class="module-body">
+                ${bodyHtml}
+                <div class="jacks-container">
+                    <div class="jack-group" id="${id}-inputs">
+                        ${type !== 'source' ? `<div class="jack-row"><div class="jack" data-mod="${id}" data-type="in" onmousedown="startCable(event, '${id}', 'in')"></div> In</div>` : ''}
+                    </div>
+                    <div class="jack-group" id="${id}-outputs">
+                        ${type !== 'output' ? `<div class="jack-row output">Out <div class="jack" data-mod="${id}" data-type="out" onmousedown="startCable(event, '${id}', 'out')"></div></div>` : ''}
+                    </div>
+                </div>
+            </div>`;
+
+        document.getElementById('canvas-area').appendChild(el);
+        modules[id] = { id, type, internalNode, el, x, y, audioBuffer: null, sourceNode: null };
+        setStatus(`Added module: ${title}`);
+    }
+
+    function removeModule(id) {
+        connections = connections.filter(c => {
+            if (c.fromMod === id || c.toMod === id) {
+                disconnectAudio(c);
+                return false;
+            }
+            return true;
+        });
+
+        if (modules[id].sourceNode) {
+            try { modules[id].sourceNode.stop(); } catch(e){}
+        }
+
+        modules[id].el.remove();
+        delete modules[id];
+        redrawCables();
+        setStatus('Module removed.');
+    }
+
+    // Module dragging logic
+    let draggingModId = null;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    function startDragModule(e, id) {
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+        draggingModId = id;
+        const mod = modules[id];
+        const rect = mod.el.getBoundingClientRect();
+        const canvasRect = document.getElementById('canvas-area').getBoundingClientRect();
+        dragOffsetX = e.clientX - rect.left;
+        dragOffsetY = e.clientY - rect.top;
+
+        document.addEventListener('mousemove', onModuleDrag);
+        document.addEventListener('mouseup', stopModuleDrag);
+    }
+
+    function onModuleDrag(e) {
+        if (!draggingModId) return;
+        const canvasRect = document.getElementById('canvas-area').getBoundingClientRect();
+        const canvas = document.getElementById('canvas-area');
+        
+        let x = e.clientX - canvasRect.left + canvas.scrollLeft - dragOffsetX;
+        let y = e.clientY - canvasRect.top + canvas.scrollTop - dragOffsetY;
+
+        modules[draggingModId].x = Math.max(0, x);
+        modules[draggingModId].y = Math.max(0, y);
+        modules[draggingModId].el.style.left = modules[draggingModId].x + 'px';
+        modules[draggingModId].el.style.top = modules[draggingModId].y + 'px';
+
+        redrawCables();
+    }
+
+    function stopModuleDrag() {
+        draggingModId = null;
+        document.removeEventListener('mousemove', onModuleDrag);
+        document.removeEventListener('mouseup', stopModuleDrag);
+    }
+
+    // Cable Patching Drag & Drop
+    function startCable(e, modId, type) {
+        e.stopPropagation();
+        e.preventDefault();
+        const jackEl = e.target;
+        jackEl.classList.add('active-cable-source');
+
+        const pos = getJackCenter(modId, type);
+        activeCable = {
+            fromMod: modId,
+            fromType: type, // 'out' or 'in'
+            startX: pos.x,
+            startY: pos.y,
+            currentX: pos.x,
+            currentY: pos.y
+        };
+        setStatus(`Dragging cable from ${type.toUpperCase()} jack... Release on valid jack.`);
+    }
+
+    function onCanvasMouseMove(e) {
+        if (!activeCable) return;
+        const canvasRect = document.getElementById('canvas-area').getBoundingClientRect();
+        const canvas = document.getElementById('canvas-area');
+        
+        activeCable.currentX = e.clientX - canvasRect.left + canvas.scrollLeft;
+        activeCable.currentY = e.clientY - canvasRect.top + canvas.scrollTop;
+        redrawCables();
+    }
+
+    function onCanvasMouseUp(e) {
+        if (!activeCable) return;
+
+        // Check if mouse was released over a jack
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (target && target.classList.contains('jack')) {
+            const toMod = target.getAttribute('data-mod');
+            const toType = target.getAttribute('data-type');
+
+            // Valid connection: Output -> Input OR Input -> Output
+            if (toMod && toType && toMod !== activeCable.fromMod && toType !== activeCable.fromType) {
+                const fromId = activeCable.fromType === 'out' ? activeCable.fromMod : toMod;
+                const toId = activeCable.fromType === 'in' ? activeCable.fromMod : toMod;
+                connectModules(fromId, toId);
+            } else {
+                setStatus('Invalid connection (must connect Output to Input).');
+            }
+        } else {
+            setStatus('Cable dropped in empty space.');
+        }
+
+        document.querySelectorAll('.jack.active-cable-source').forEach(el => el.classList.remove('active-cable-source'));
+        activeCable = null;
+        redrawCables();
+    }
+
+    function connectModules(fromId, toId) {
+        if (connections.some(c => c.fromMod === fromId && c.toMod === toId)) {
+            setStatus('Modules already connected.');
+            return;
+        }
+
+        const fromMod = modules[fromId];
+        const toMod = modules[toId];
+
+        let outputNode = fromMod.type === 'eq' ? fromMod.internalNode.output : fromMod.internalNode;
+        let inputNode = toMod.type === 'eq' ? toMod.internalNode.input : toMod.internalNode;
+
+        try {
+            outputNode.connect(inputNode);
+            connections.push({ fromMod: fromId, toMod: toId });
+            redrawCables();
+            setStatus(`Connected ${fromMod.type} -> ${toMod.type}`);
+        } catch(err) {
+            alert('Connection failed: ' + err);
+        }
+    }
+
+    function disconnectAudio(conn) {
+        const fromMod = modules[conn.fromMod];
+        const toMod = modules[conn.toMod];
+        if (!fromMod || !toMod) return;
+
+        let outputNode = fromMod.type === 'eq' ? fromMod.internalNode.output : fromMod.internalNode;
+        let inputNode = toMod.type === 'eq' ? toMod.internalNode.input : toMod.internalNode;
+
+        try { outputNode.disconnect(inputNode); } catch(e) {}
+    }
+
+    function getJackCenter(modId, type) {
+        const mod = modules[modId];
+        if (!mod) return { x: 0, y: 0 };
+        const jackEl = mod.el.querySelector(`.jack[data-type="${type}"]`);
+        if (!jackEl) return { x: mod.x + 100, y: mod.y + 50 };
+
+        const canvasRect = document.getElementById('canvas-area').getBoundingClientRect();
+        const rect = jackEl.getBoundingClientRect();
+        const canvas = document.getElementById('canvas-area');
+
+        return {
+            x: rect.left - canvasRect.left + canvas.scrollLeft + 7,
+            y: rect.top - canvasRect.top + canvas.scrollTop + 7
+        };
+    }
+
+    function redrawCables() {
+        const svg = document.getElementById('cable-svg');
+        let svgContent = '';
+
+        // Draw existing connections
+        connections.forEach(conn => {
+            const p1 = getJackCenter(conn.fromMod, 'out');
+            const p2 = getJackCenter(conn.toMod, 'in');
+            const dx = Math.abs(p2.x - p1.x) * 0.5;
+            svgContent += `<path d="M ${p1.x} ${p1.y} C ${p1.x + dx} ${p1.y}, ${p2.x - dx} ${p2.y}, ${p2.x} ${p2.y}" fill="none" stroke="#007acc" stroke-width="2.5" opacity="0.85"/>`;
+        });
+
+        // Draw active drag cable
+        if (activeCable) {
+            const startP = activeCable.fromType === 'out' ? getJackCenter(activeCable.fromMod, 'out') : { x: activeCable.currentX, y: activeCable.currentY };
+            const endP = activeCable.fromType === 'out' ? { x: activeCable.currentX, y: activeCable.currentY } : getJackCenter(activeCable.fromMod, 'in');
+            const dx = Math.abs(endP.x - startP.x) * 0.5;
+            svgContent += `<path d="M ${startP.x} ${startP.y} C ${startP.x + dx} ${startP.y}, ${endP.x - dx} ${endP.y}, ${endP.x} ${endP.y}" fill="none" stroke="#ff9800" stroke-width="2.5" stroke-dasharray="4" opacity="0.9"/>`;
+        }
+
+        svg.innerHTML = svgContent;
+    }
+
+    function updateParam(id, param, val) {
+        document.getElementById(`${id}-${param === 'freq' ? 'freq' : param === 'vol' ? 'vol' : 'val'}`).textContent = val;
+        const node = modules[id].internalNode;
+        if (param === 'gain') node.gain.value = Math.pow(10, val / 20);
+        if (param === 'freq') node.frequency.value = parseFloat(val);
+        if (param === 'vol') node.gain.value = Math.pow(10, val / 20);
+    }
+
+    function updateEQ(id, band, val) {
+        document.getElementById(`${id}-${band[0]}`).textContent = val;
+        const eq = modules[id].internalNode;
+        if (band === 'low') eq.input.gain.value = parseFloat(val);
+    }
+
+    function updateComp(id, param, val) {
+        document.getElementById(`${id}-${param}`).textContent = val;
+        const comp = modules[id].internalNode;
+        if (param === 'thresh') comp.threshold.value = parseFloat(val);
+        if (param === 'ratio') comp.ratio.value = parseFloat(val);
+    }
+
+    function updateDelay(id, val) {
+        document.getElementById(`${id}-time`).textContent = val;
+        modules[id].internalNode.delayTime.value = parseFloat(val) / 1000;
+    }
+</script>
+
+</body>
+</html>
